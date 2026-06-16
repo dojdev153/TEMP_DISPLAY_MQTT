@@ -1,0 +1,20 @@
+[Unit]
+Description=Arduino DHT11 MQTT Temperature Dashboard
+After=network-online.target mosquitto.service
+Wants=network-online.target
+Requires=mosquitto.service
+
+[Service]
+Type=simple
+User=user218
+Group=user218
+WorkingDirectory=/home/user218/temperature-dashboard
+EnvironmentFile=/home/user218/temperature-dashboard/.env
+ExecStart=/home/user218/temperature-dashboard/.venv/bin/gunicorn --workers 1 --threads 4 --bind 127.0.0.1:3000 --timeout 0 app:app
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

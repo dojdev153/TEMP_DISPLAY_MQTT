@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Arduino Temperature Monitor</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --bg: #07111f;
+      --panel: rgba(17, 32, 52, 0.82);
+      --border: rgba(148, 163, 184, 0.2);
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --good: #34d399;
+      --warm: #fbbf24;
+      --hot: #fb7185;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 10% 10%, rgba(56, 189, 248, 0.14), transparent 28rem),
+        radial-gradient(circle at 90% 80%, rgba(52, 211, 153, 0.1), transparent 30rem),
+        var(--bg);
+      color: var(--text);
+    }
+    .shell { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 36px 0 56px; }
+    header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 28px; }
+    .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: .16em; font-size: .75rem; font-weight: 800; }
+    h1 { margin: 8px 0 6px; font-size: clamp(1.8rem, 5vw, 3.3rem); line-height: 1.05; }
+    .subtitle { margin: 0; color: var(--muted); }
+    .status { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid var(--border); background: var(--panel); border-radius: 999px; color: var(--muted); white-space: nowrap; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--warm); box-shadow: 0 0 18px currentColor; }
+    .dot.online { background: var(--good); }
+    .grid { display: grid; grid-template-columns: .8fr 1.8fr; gap: 20px; }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 24px; padding: 24px; box-shadow: 0 18px 50px rgba(0,0,0,.2); backdrop-filter: blur(18px); }
+    .label { color: var(--muted); font-size: .88rem; }
+    .temperature { display: flex; align-items: flex-start; margin: 14px 0 8px; }
+    .temperature strong { font-size: clamp(4rem, 12vw, 7.2rem); line-height: .9; letter-spacing: -.07em; }
+    .temperature span { font-size: 1.5rem; margin: 8px 0 0 12px; color: var(--muted); }
+    .condition { font-size: 1.05rem; color: var(--good); font-weight: 700; }
+    .meta { margin-top: 28px; display: grid; gap: 12px; }
+    .meta-row { display: flex; justify-content: space-between; gap: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+    .meta-row span:last-child { text-align: right; color: var(--text); }
+    .chart-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+    .chart-title { margin: 0; font-size: 1.15rem; }
+    .chart-wrap { width: 100%; min-height: 330px; position: relative; }
+    svg { width: 100%; height: 330px; overflow: visible; }
+    .grid-line { stroke: rgba(148, 163, 184, 0.16); stroke-width: 1; }
+    .temperature-line { fill: none; stroke: var(--accent); stroke-width: 4; stroke-linejoin: round; stroke-linecap: round; filter: drop-shadow(0 0 8px rgba(56,189,248,.45)); }
+    .area { fill: url(#areaGradient); }
+    .axis-label { fill: var(--muted); font-size: 11px; }
+    .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
+    footer { color: var(--muted); font-size: .84rem; margin-top: 20px; text-align: center; }
+    @media (max-width: 820px) {
+      header { flex-direction: column; }
+      .grid { grid-template-columns: 1fr; }
+      .chart-wrap, svg { min-height: 280px; height: 280px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <div class="eyebrow">Embedded systems project</div>
+        <h1>Temperature Monitor</h1>
+        <p class="subtitle">HITAYEZU Frank Duff - Arduino Uno, DHT11, MQTT and VPS dashboard</p>
+      </div>
+      <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">Connecting...</span></div>
+    </header>
+
+    <section class="grid">
+      <article class="card">
+        <div class="label">Current temperature</div>
+        <div class="temperature"><strong id="temperature">--.-</strong><span>°C</span></div>
+        <div id="condition" class="condition">Waiting for sensor data</div>
+
+        <div class="meta">
+          <div class="meta-row"><span class="label">Device</span><span id="device">Arduino Uno + DHT11</span></div>
+          <div class="meta-row"><span class="label">MQTT topic</span><span>rca/hitayezu-frank-duff/temperature</span></div>
+          <div class="meta-row"><span class="label">Last update</span><span id="lastUpdate">Never</span></div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="chart-header">
+          <h2 class="chart-title">Recent readings</h2>
+          <span class="label">Latest 120 samples</span>
+        </div>
+        <div class="chart-wrap">
+          <div id="emptyState" class="empty">Waiting for the first MQTT reading...</div>
+          <svg id="chart" viewBox="0 0 760 330" role="img" aria-label="Temperature history chart">
+            <defs>
+              <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.28" />
+                <stop offset="100%" stop-color="#38bdf8" stop-opacity="0" />
+              </linearGradient>
+            </defs>
+            <g id="gridLines"></g>
+            <path id="areaPath" class="area" d="" />
+            <polyline id="line" class="temperature-line" points="" />
+            <g id="axisLabels"></g>
+          </svg>
+        </div>
+      </article>
+    </section>
+
+    <footer>Live data path: DHT11 -> Arduino -> USB serial -> PC publisher -> MQTT broker -> VPS dashboard</footer>
+  </main>
+
+  <script>
+    const readings = [];
+    const MAX_POINTS = 120;
+    const eventSource = new EventSource("/events");
+
+    const statusDot = document.getElementById("statusDot");
+    const statusText = document.getElementById("statusText");
+    const temperatureElement = document.getElementById("temperature");
+    const conditionElement = document.getElementById("condition");
+    const lastUpdateElement = document.getElementById("lastUpdate");
+    const deviceElement = document.getElementById("device");
+    const emptyState = document.getElementById("emptyState");
+
+    eventSource.onopen = () => {
+      statusDot.classList.add("online");
+      statusText.textContent = "Dashboard connected";
+    };
+
+    eventSource.onerror = () => {
+      statusDot.classList.remove("online");
+      statusText.textContent = "Reconnecting...";
+    };
+
+    eventSource.addEventListener("history", (event) => {
+      const items = JSON.parse(event.data);
+      readings.splice(0, readings.length, ...items.slice(-MAX_POINTS));
+      if (items.length) updateCurrentReading(items[items.length - 1]);
+      renderChart();
+    });
+
+    eventSource.addEventListener("temperature", (event) => {
+      const reading = JSON.parse(event.data);
+      updateCurrentReading(reading);
+      readings.push(reading);
+      if (readings.length > MAX_POINTS) readings.shift();
+      renderChart();
+    });
+
+    function updateCurrentReading(reading) {
+      const value = Number(reading.temperature);
+      if (!Number.isFinite(value)) return;
+
+      temperatureElement.textContent = value.toFixed(1);
+      deviceElement.textContent = reading.device || "Arduino Uno + DHT11";
+      lastUpdateElement.textContent = new Date(reading.timestamp || reading.receivedAt || Date.now()).toLocaleString();
+
+      if (value < 18) {
+        conditionElement.textContent = "Cool";
+        conditionElement.style.color = "var(--accent)";
+      } else if (value <= 30) {
+        conditionElement.textContent = "Normal room range";
+        conditionElement.style.color = "var(--good)";
+      } else if (value <= 38) {
+        conditionElement.textContent = "Warm";
+        conditionElement.style.color = "var(--warm)";
+      } else {
+        conditionElement.textContent = "High temperature";
+        conditionElement.style.color = "var(--hot)";
+      }
+    }
+
+    function renderChart() {
+      const values = readings.map(item => Number(item.temperature)).filter(Number.isFinite);
+      emptyState.style.display = values.length ? "none" : "grid";
+      if (!values.length) return;
+
+      const width = 760;
+      const height = 330;
+      const pad = { left: 48, right: 18, top: 18, bottom: 34 };
+      const plotWidth = width - pad.left - pad.right;
+      const plotHeight = height - pad.top - pad.bottom;
+      const rawMin = Math.min(...values);
+      const rawMax = Math.max(...values);
+      const margin = Math.max(2, (rawMax - rawMin) * 0.2);
+      const min = Math.floor(rawMin - margin);
+      const max = Math.ceil(rawMax + margin);
+      const range = Math.max(1, max - min);
+
+      const points = values.map((value, index) => {
+        const x = pad.left + (values.length === 1 ? plotWidth / 2 : (index / (values.length - 1)) * plotWidth);
+        const y = pad.top + ((max - value) / range) * plotHeight;
+        return [x, y];
+      });
+
+      document.getElementById("line").setAttribute("points", points.map(point => point.join(",")).join(" "));
+
+      const areaPath = [
+        `M ${points[0][0]} ${pad.top + plotHeight}`,
+        ...points.map(point => `L ${point[0]} ${point[1]}`),
+        `L ${points[points.length - 1][0]} ${pad.top + plotHeight}`,
+        "Z"
+      ].join(" ");
+      document.getElementById("areaPath").setAttribute("d", areaPath);
+
+      const gridLines = document.getElementById("gridLines");
+      const axisLabels = document.getElementById("axisLabels");
+      gridLines.innerHTML = "";
+      axisLabels.innerHTML = "";
+
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.top + (i / 4) * plotHeight;
+        const value = max - (i / 4) * range;
+        gridLines.insertAdjacentHTML("beforeend", `<line class="grid-line" x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}" />`);
+        axisLabels.insertAdjacentHTML("beforeend", `<text class="axis-label" x="6" y="${y + 4}">${value.toFixed(1)}°C</text>`);
+      }
+    }
+  </script>
+</body>
+</html>

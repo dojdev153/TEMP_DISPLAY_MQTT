@@ -1,0 +1,8 @@
+# /etc/mosquitto/acl
+# The PC is allowed to publish, but not subscribe.
+user pc_publisher
+topic write rca/hitayezu-frank-duff/temperature
+
+# The VPS dashboard is allowed to subscribe, but not publish.
+user dashboard_reader
+topic read rca/hitayezu-frank-duff/temperature
